@@ -7,6 +7,9 @@ use std::{
     time::Duration,
 };
 
+#[cfg(target_os = "macos")]
+use std::process::{Command, Stdio};
+
 use clipboard_history::{
     Writer,
     clipboard_manager::{ClipboardManager, ClipboardRequest},
@@ -70,7 +73,38 @@ fn create_tray() -> TrayState {
     }
 }
 
+#[cfg(target_os = "macos")]
+fn detach_from_terminal() {
+    if std::env::var_os("CLIPBOARD_HISTORY_DAEMONIZED").is_some() {
+        return;
+    }
+
+    if std::env::var_os("TERM").is_none() {
+        return;
+    }
+
+    let Ok(executable) = std::env::current_exe() else {
+        return;
+    };
+
+    let args: Vec<_> = std::env::args_os().skip(1).collect();
+    let mut command = Command::new(executable);
+    command
+        .args(args)
+        .env("CLIPBOARD_HISTORY_DAEMONIZED", "1")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+
+    if command.spawn().is_ok() {
+        std::process::exit(0);
+    }
+}
+
 fn main() -> eframe::Result<()> {
+    #[cfg(target_os = "macos")]
+    detach_from_terminal();
+
     let rt = Arc::new(
         tokio::runtime::Builder::new_multi_thread()
             .enable_all()
