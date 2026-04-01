@@ -16,7 +16,7 @@ use clipboard_history::{
 use eframe::egui;
 use tokio::runtime::Runtime;
 use tray_icon::{
-    Icon, TrayIcon, TrayIconBuilder, TrayIconEvent,
+    Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent,
     menu::{Menu, MenuEvent, MenuId, MenuItem},
 };
 
@@ -56,6 +56,7 @@ fn create_tray() -> TrayState {
         .with_tooltip("Clipboard History")
         .with_icon(make_icon())
         .with_icon_as_template(true)
+        .with_menu_on_left_click(false)
         .build()
         .expect("tray icon creation failed");
     let tray_id = tray.id().clone();
@@ -83,6 +84,7 @@ fn main() -> eframe::Result<()> {
         viewport: egui::ViewportBuilder::default()
             .with_title("Clipboard History")
             .with_inner_size([500.0, 650.0])
+            .with_titlebar_buttons_shown(false)
             .with_visible(false),
         ..Default::default()
     };
@@ -176,16 +178,24 @@ impl App {
                 let mut handled_event = false;
 
                 while let Ok(event) = TrayIconEvent::receiver().try_recv() {
-                    if *event.id() == tray_id {
-                        let should_show = !window_visible.load(Ordering::Relaxed);
-                        window_visible.store(should_show, Ordering::Relaxed);
+                    if let TrayIconEvent::Click {
+                        id,
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        if id == tray_id {
+                            let should_show = !window_visible.load(Ordering::Relaxed);
+                            window_visible.store(should_show, Ordering::Relaxed);
 
-                        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(should_show));
-                        if should_show {
-                            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
-                            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(should_show));
+                            if should_show {
+                                ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+                                ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+                            }
+                            ctx.request_repaint();
                         }
-                        ctx.request_repaint();
                     }
                     handled_event = true;
                 }
