@@ -10,6 +10,7 @@ use eframe::egui;
 use tokio::runtime::Runtime;
 use tray_icon::{
     Icon, TrayIcon, TrayIconBuilder,
+    TrayIconEvent,
     menu::{Menu, MenuEvent, MenuId, MenuItem},
 };
 
@@ -18,6 +19,7 @@ struct TrayState {
     show_id: MenuId,
     hide_id: MenuId,
     quit_id: MenuId,
+    tray_id: tray_icon::TrayIconId,
 }
 
 fn make_icon() -> Icon {
@@ -50,12 +52,14 @@ fn create_tray() -> TrayState {
         .with_icon_as_template(true)
         .build()
         .expect("tray icon creation failed");
+    let tray_id = tray.id().clone();
 
     TrayState {
         _tray: tray,
         show_id,
         hide_id,
         quit_id,
+        tray_id,
     }
 }
 
@@ -129,6 +133,7 @@ struct App {
     tray: TrayState,
     items: Vec<String>,
     status: String,
+    window_visible: bool,
 }
 
 impl App {
@@ -145,6 +150,7 @@ impl App {
             tray,
             items: Vec::new(),
             status: "Watching clipboard…".to_string(),
+            window_visible: false,
         }
     }
 
@@ -180,11 +186,27 @@ impl App {
     }
 
     fn handle_tray_events(&mut self, ui: &mut egui::Ui) {
-        while let Ok(event) = MenuEvent::receiver().try_recv() {
-            if event.id == self.tray.show_id {
+        while let Ok(event) = TrayIconEvent::receiver().try_recv() {
+            if event.id() == self.tray.tray_id {
+                self.window_visible = true;
                 ui.ctx()
                     .send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                ui.ctx()
+                    .send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Focus);
+            }
+        }
+
+        while let Ok(event) = MenuEvent::receiver().try_recv() {
+            if event.id == self.tray.show_id {
+                self.window_visible = true;
+                ui.ctx()
+                    .send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                ui.ctx()
+                    .send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Focus);
             } else if event.id == self.tray.hide_id {
+                self.window_visible = false;
                 ui.ctx()
                     .send_viewport_cmd(egui::ViewportCommand::Visible(false));
             } else if event.id == self.tray.quit_id {
@@ -197,6 +219,25 @@ impl App {
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.handle_tray_events(ui);
+
+        let minimized = ui
+            .ctx()
+            .input(|i| i.viewport().minimized)
+            .unwrap_or(false);
+
+        if minimized {
+            self.window_visible = false;
+            ui.ctx()
+                .send_viewport_cmd(egui::ViewportCommand::Visible(false));
+            ui.ctx()
+                .send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+        }
+
+        if !self.window_visible {
+            ui.request_repaint_after(Duration::from_millis(150));
+            return;
+        }
+
         self.refresh_history();
         ui.request_repaint_after(Duration::from_millis(300));
 
@@ -205,6 +246,7 @@ impl eframe::App for App {
                 ui.heading("Clipboard History");
 
                 if ui.button("Hide").clicked() {
+                    self.window_visible = false;
                     ui.ctx()
                         .send_viewport_cmd(egui::ViewportCommand::Visible(false));
                 }
