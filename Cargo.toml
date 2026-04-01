@@ -7,6 +7,7 @@ edition = "2024"
 arboard = "3.6.1"
 eframe = "0.34.1"
 egui = "0.34.1"
+objc = "0.2"
 tokio = { version = "1.50.0", features = ["full"] }
 tray-icon = "0.21.3"
 [package.metadata.bundle]
@@ -14,3 +15,5 @@ name = "Clipboard History"
 identifier = "dev.joao.clipboard-history"
 icon = []
 plist = "Info.plist"
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(cargo_clippy)'] }

@@ -1,3 +1,4 @@
+#![allow(unexpected_cfgs)]
 use std::{
     collections::VecDeque,
     sync::{
@@ -73,6 +74,19 @@ fn create_tray() -> TrayState {
     }
 }
 
+
+#[cfg(target_os = "macos")]
+fn hide_dock_icon() {
+    use objc::{msg_send, sel, sel_impl};
+    unsafe {
+        let cls = objc::runtime::Class::get("NSApplication").unwrap();
+        let app: *mut objc::runtime::Object = msg_send![cls, sharedApplication];
+        // Policy 1 = NSApplicationActivationPolicyAccessory (Tray only, no Dock)
+        // Policy 0 = NSApplicationActivationPolicyRegular (Normal app)
+        let _: () = msg_send![app, setActivationPolicy: 1];
+    }
+}
+
 #[cfg(target_os = "macos")]
 fn detach_from_terminal() {
     if std::env::var_os("CLIPBOARD_HISTORY_DAEMONIZED").is_some() {
@@ -104,6 +118,7 @@ fn detach_from_terminal() {
 fn main() -> eframe::Result<()> {
     #[cfg(target_os = "macos")]
     detach_from_terminal();
+        
 
     let rt = Arc::new(
         tokio::runtime::Builder::new_multi_thread()
@@ -190,7 +205,8 @@ impl App {
     ) -> Self {
         let window_visible = Arc::new(AtomicBool::new(false));
         Self::start_tray_listener(ctx, &tray, window_visible.clone());
-
+        #[cfg(target_os = "macos")]
+        hide_dock_icon();
         Self {
             rt,
             history_tx,
@@ -294,14 +310,20 @@ impl App {
 
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        let minimized = ui.ctx().input(|i| i.viewport().minimized).unwrap_or(false);
+        // 1. Get the current focus and minimized state from the viewport
+        let info = ui.ctx().input(|i| i.viewport().clone());
+        let focused = info.focused.unwrap_or(true);
+        let minimized = info.minimized.unwrap_or(false);
 
-        if minimized {
+        // 2. Hide if minimized or if it loses focus while being visible
+        if minimized || (self.was_visible && !focused) {
             self.window_visible.store(false, Ordering::Relaxed);
-            ui.ctx()
-                .send_viewport_cmd(egui::ViewportCommand::Visible(false));
-            ui.ctx()
-                .send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Visible(false));
+            
+            // Reset minimized state so it can be reopened normally
+            if minimized {
+                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+            }
         }
 
         if !self.window_visible.load(Ordering::Relaxed) {
@@ -313,7 +335,6 @@ impl eframe::App for App {
             self.refresh_history();
             self.was_visible = true;
         }
-
         egui::CentralPanel::default().show_inside(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.heading("Clipboard History");
