@@ -1,0 +1,16 @@
+[package]
+name = "clipboard_history"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+arboard = "3.6.1"
+eframe = "0.34.1"
+egui = "0.34.1"
+tokio = { version = "1.50.0", features = ["full"] }
+tray-icon = "0.21.3"
+[package.metadata.bundle]
+name = "Clipboard History"
+identifier = "dev.joao.clipboard-history"
+icon = []
+plist = "Info.plist"
