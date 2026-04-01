@@ -190,3 +190,13 @@ Build the project with:
 
 ```bash
 cargo build --release
+
+
+## Inspiration
+
+Part of the motivation for this project came from using **Clipboard History by SUPERCILEX** on GNOME, which solved this problem really well for me on Fedora.
+
+That experience made me want something similar on macOS, where I did not have an equivalent built-in workflow for clipboard history.
+
+GNOME extension:
+[Clipboard History by SUPERCILEX](https://extensions.gnome.org/extension/4839/clipboard-history/)
