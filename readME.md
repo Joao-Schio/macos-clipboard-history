@@ -190,7 +190,7 @@ Build the project with:
 
 ```bash
 cargo build --release
-
+```
 
 ## Inspiration
 
