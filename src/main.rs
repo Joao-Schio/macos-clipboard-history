@@ -22,22 +22,12 @@ use tray_icon::{
 
 #[cfg(target_os = "macos")]
 fn configure_macos_activation_policy() {
-    use cocoa::appkit::{
-        NSApp, NSApplication, NSApplicationActivationPolicyAccessory, NSApplicationActivationPolicyRegular,
-    };
-    use cocoa::base::nil;
+    use objc::{class, msg_send, sel, sel_impl};
+    use objc::runtime::Object;
 
     unsafe {
-        let app = NSApp();
-        if app == nil {
-            let app = NSApplication::sharedApplication(nil);
-            app.setActivationPolicy_(NSApplicationActivationPolicyAccessory);
-            return;
-        }
-
-        if app.activationPolicy() == NSApplicationActivationPolicyRegular {
-            app.setActivationPolicy_(NSApplicationActivationPolicyAccessory);
-        }
+        let app: *mut Object = msg_send![class!(NSApplication), sharedApplication];
+        let _: bool = msg_send![app, setActivationPolicy: 1isize];
     }
 }
 
