@@ -24,7 +24,7 @@ impl HistoryManager {
             match req {
                 ManagerRequest::Add { content } => {
                     self.history.push_front(content);
-                    if self.history.len() == self.max_size {
+                    if self.history.len() > self.max_size {
                         let _ = self.history.pop_back();
                     }
                 },
