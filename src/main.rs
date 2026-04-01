@@ -1,16 +1,22 @@
-use std::{collections::VecDeque, sync::Arc, time::Duration};
+use std::{
+    collections::VecDeque,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::Duration,
+};
 
 use clipboard_history::{
+    Writer,
     clipboard_manager::{ClipboardManager, ClipboardRequest},
     content_manager::ContentManager,
     history::{HistoryManager, ManagerRequest},
-    Writer,
 };
 use eframe::egui;
 use tokio::runtime::Runtime;
 use tray_icon::{
-    Icon, TrayIcon, TrayIconBuilder,
-    TrayIconEvent,
+    Icon, TrayIcon, TrayIconBuilder, TrayIconEvent,
     menu::{Menu, MenuEvent, MenuId, MenuItem},
 };
 
@@ -92,6 +98,7 @@ fn main() -> eframe::Result<()> {
                 history_tx.clone(),
                 clipboard_tx.clone(),
                 tray,
+                _cc.egui_ctx.clone(),
             )))
         }),
     )
@@ -133,7 +140,7 @@ struct App {
     tray: TrayState,
     items: Vec<String>,
     status: String,
-    window_visible: bool,
+    window_visible: Arc<AtomicBool>,
 }
 
 impl App {
@@ -142,7 +149,11 @@ impl App {
         history_tx: Writer<ManagerRequest>,
         clipboard_tx: Writer<ClipboardRequest>,
         tray: TrayState,
+        ctx: egui::Context,
     ) -> Self {
+        let window_visible = Arc::new(AtomicBool::new(false));
+        Self::start_tray_listener(ctx, &tray, window_visible.clone());
+
         Self {
             rt,
             history_tx,
@@ -150,8 +161,57 @@ impl App {
             tray,
             items: Vec::new(),
             status: "Watching clipboard…".to_string(),
-            window_visible: false,
+            window_visible,
         }
+    }
+
+    fn start_tray_listener(ctx: egui::Context, tray: &TrayState, window_visible: Arc<AtomicBool>) {
+        let tray_id = tray.tray_id.clone();
+        let show_id = tray.show_id.clone();
+        let hide_id = tray.hide_id.clone();
+        let quit_id = tray.quit_id.clone();
+
+        std::thread::spawn(move || {
+            loop {
+                let mut handled_event = false;
+
+                while let Ok(event) = TrayIconEvent::receiver().try_recv() {
+                    if *event.id() == tray_id {
+                        let should_show = !window_visible.load(Ordering::Relaxed);
+                        window_visible.store(should_show, Ordering::Relaxed);
+
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(should_show));
+                        if should_show {
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+                        }
+                        ctx.request_repaint();
+                    }
+                    handled_event = true;
+                }
+
+                while let Ok(event) = MenuEvent::receiver().try_recv() {
+                    if event.id == show_id {
+                        window_visible.store(true, Ordering::Relaxed);
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+                        ctx.request_repaint();
+                    } else if event.id == hide_id {
+                        window_visible.store(false, Ordering::Relaxed);
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+                    } else if event.id == quit_id {
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                        return;
+                    }
+                    handled_event = true;
+                }
+
+                if !handled_event {
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+            }
+        });
     }
 
     fn refresh_history(&mut self) {
@@ -184,56 +244,21 @@ impl App {
             let _ = clipboard_tx.send(ClipboardRequest::Set { content }).await;
         });
     }
-
-    fn handle_tray_events(&mut self, ui: &mut egui::Ui) {
-        while let Ok(event) = TrayIconEvent::receiver().try_recv() {
-            if event.id() == self.tray.tray_id {
-                self.window_visible = true;
-                ui.ctx()
-                    .send_viewport_cmd(egui::ViewportCommand::Visible(true));
-                ui.ctx()
-                    .send_viewport_cmd(egui::ViewportCommand::Minimized(false));
-                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Focus);
-            }
-        }
-
-        while let Ok(event) = MenuEvent::receiver().try_recv() {
-            if event.id == self.tray.show_id {
-                self.window_visible = true;
-                ui.ctx()
-                    .send_viewport_cmd(egui::ViewportCommand::Visible(true));
-                ui.ctx()
-                    .send_viewport_cmd(egui::ViewportCommand::Minimized(false));
-                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Focus);
-            } else if event.id == self.tray.hide_id {
-                self.window_visible = false;
-                ui.ctx()
-                    .send_viewport_cmd(egui::ViewportCommand::Visible(false));
-            } else if event.id == self.tray.quit_id {
-                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
-            }
-        }
-    }
 }
 
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        self.handle_tray_events(ui);
-
-        let minimized = ui
-            .ctx()
-            .input(|i| i.viewport().minimized)
-            .unwrap_or(false);
+        let minimized = ui.ctx().input(|i| i.viewport().minimized).unwrap_or(false);
 
         if minimized {
-            self.window_visible = false;
+            self.window_visible.store(false, Ordering::Relaxed);
             ui.ctx()
                 .send_viewport_cmd(egui::ViewportCommand::Visible(false));
             ui.ctx()
                 .send_viewport_cmd(egui::ViewportCommand::Minimized(false));
         }
 
-        if !self.window_visible {
+        if !self.window_visible.load(Ordering::Relaxed) {
             ui.request_repaint_after(Duration::from_millis(150));
             return;
         }
@@ -246,7 +271,7 @@ impl eframe::App for App {
                 ui.heading("Clipboard History");
 
                 if ui.button("Hide").clicked() {
-                    self.window_visible = false;
+                    self.window_visible.store(false, Ordering::Relaxed);
                     ui.ctx()
                         .send_viewport_cmd(egui::ViewportCommand::Visible(false));
                 }
