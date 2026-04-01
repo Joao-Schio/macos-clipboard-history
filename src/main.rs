@@ -143,6 +143,7 @@ struct App {
     items: Vec<String>,
     status: String,
     window_visible: Arc<AtomicBool>,
+    was_visible: bool,
 }
 
 impl App {
@@ -164,6 +165,7 @@ impl App {
             items: Vec::new(),
             status: "Watching clipboard…".to_string(),
             window_visible,
+            was_visible: false,
         }
     }
 
@@ -269,12 +271,14 @@ impl eframe::App for App {
         }
 
         if !self.window_visible.load(Ordering::Relaxed) {
-            ui.request_repaint_after(Duration::from_millis(150));
+            self.was_visible = false;
             return;
         }
 
-        self.refresh_history();
-        ui.request_repaint_after(Duration::from_millis(300));
+        if !self.was_visible {
+            self.refresh_history();
+            self.was_visible = true;
+        }
 
         egui::CentralPanel::default().show_inside(ui, |ui| {
             ui.horizontal(|ui| {
