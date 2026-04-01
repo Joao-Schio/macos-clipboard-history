@@ -20,6 +20,30 @@ use tray_icon::{
     menu::{Menu, MenuEvent, MenuId, MenuItem},
 };
 
+#[cfg(target_os = "macos")]
+fn configure_macos_activation_policy() {
+    use cocoa::appkit::{
+        NSApp, NSApplication, NSApplicationActivationPolicyAccessory, NSApplicationActivationPolicyRegular,
+    };
+    use cocoa::base::nil;
+
+    unsafe {
+        let app = NSApp();
+        if app == nil {
+            let app = NSApplication::sharedApplication(nil);
+            app.setActivationPolicy_(NSApplicationActivationPolicyAccessory);
+            return;
+        }
+
+        if app.activationPolicy() == NSApplicationActivationPolicyRegular {
+            app.setActivationPolicy_(NSApplicationActivationPolicyAccessory);
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn configure_macos_activation_policy() {}
+
 struct TrayState {
     _tray: TrayIcon,
     show_id: MenuId,
@@ -71,6 +95,8 @@ fn create_tray() -> TrayState {
 }
 
 fn main() -> eframe::Result<()> {
+    configure_macos_activation_policy();
+
     let rt = Arc::new(
         tokio::runtime::Builder::new_multi_thread()
             .enable_all()
