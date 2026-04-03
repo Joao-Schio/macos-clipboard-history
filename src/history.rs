@@ -19,10 +19,18 @@ impl HistoryManager {
         Self { history: VecDeque::new(), requests, max_size : 200 }
     }
 
+    #[inline(always)]
+    fn find_and_remove(&mut self, content: &str) {
+        if let Some(idx) = self.history.iter().position(|entry| entry == content) {
+            self.history.remove(idx);
+        }
+    }
+
     pub async fn start(&mut self) -> tokio::io::Result<()> {
         while let Some(req) = self.requests.recv().await {
             match req {
                 ManagerRequest::Add { content } => {
+                    self.find_and_remove(&content);
                     self.history.push_front(content);
                     if self.history.len() > self.max_size {
                         let _ = self.history.pop_back();
