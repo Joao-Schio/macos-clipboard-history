@@ -91,15 +91,7 @@ The history is intentionally capped at a fixed size instead of growing forever.
 
 That keeps the project simple and predictable. For my use case, I do not need persistent long-term clipboard storage; I only need quick access to recent entries.
 
-### 3. Consecutive deduplication only
-
-The current logic avoids immediately repeated copies by comparing against the last observed value.
-
-That means if I copy the same thing twice in a row, it is only stored once. But if I copy something, then something else, then the original again, it will appear again in history.
-
-This is intentional for now. I prefer preserving chronological behavior rather than trying to globally deduplicate the entire history.
-
-### 4. Personal tool first, generalized product second
+### 3. Personal tool first, generalized product second
 
 This project was built as a tool for my own workflow, not as a polished product meant to cover every edge case.
 
