@@ -14,25 +14,21 @@ impl ContentManager {
     }
 
     pub async fn start(&mut self) -> tokio::io::Result<()> {
-        let (writer, mut reader) = tokio::sync::mpsc::channel(30);
         loop {
+            let (writer, reader) = tokio::sync::oneshot::channel();
             let _ = self.clip_channel.send(
-                ClipboardRequest::Get { response: writer.clone() }
+                ClipboardRequest::Get { response: writer }
             ).await;
 
-            if let Some(candidate) = reader.recv().await {
-                if candidate != self.last {
+            if let Ok(candidate) = reader.await {
+                if self.last != candidate {
                     self.last = candidate;
-                    let _ = self.history_channel.send(
+                    let _  = self.history_channel.send(
                         ManagerRequest::Add { content: self.last.clone() }
                     ).await;
                 }
             }
-            else {
-                break;
-            }
             tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
         }
-        Ok(())
     }
 } 

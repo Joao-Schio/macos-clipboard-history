@@ -1,10 +1,10 @@
 use arboard::Clipboard;
 
-use crate::{Reader, Writer};
+use crate::Reader;
 
 
 pub enum ClipboardRequest {
-    Get {response : Writer<String> },
+    Get {response : tokio::sync::oneshot::Sender<String> },
     Set {content : String}
 }
 
@@ -27,8 +27,9 @@ impl ClipboardManager {
         while let Some(req) = self.req_channel.recv().await {
             match req {
                 ClipboardRequest::Get { response } => {
-                    let content = self.clipboard.get_text()?;
-                    let _ = response.send(content).await?;
+                    if let Ok(content) = self.clipboard.get_text() {
+                        let _ = response.send(content);
+                    }
                 },
                 ClipboardRequest::Set { content } => {
                     self.clipboard.set_text(content)?;
