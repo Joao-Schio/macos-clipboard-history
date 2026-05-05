@@ -19,6 +19,10 @@ impl HistoryManager {
         Self { history: VecDeque::new(), requests, max_size : 200 }
     }
 
+    pub fn new_with_size(requests : Reader<ManagerRequest>, max_size : usize) -> Self {
+        Self {history: VecDeque::new(), requests, max_size}
+    }
+
     #[inline(always)]
     fn find_and_remove(&mut self, content: &str) {
         if let Some(idx) = self.history.iter().position(|entry| entry == content) {

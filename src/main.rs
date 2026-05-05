@@ -158,8 +158,20 @@ fn main() -> eframe::Result<()> {
 fn setup_backend(rt: Arc<Runtime>) -> (Writer<ManagerRequest>, Writer<ClipboardRequest>) {
     let (history_tx, history_rx) = tokio::sync::mpsc::channel(30);
     let (clipboard_tx, clipboard_rx) = tokio::sync::mpsc::channel(30);
+    let mut args = std::env::args().skip(1);
 
-    let mut history = HistoryManager::new(history_rx);
+    let size = match args.next() {
+        Some(val) => {
+            val
+            .parse()
+            .expect("Failed to convert to usize")
+        },
+        None => {
+            50usize
+        }
+    };
+
+    let mut history = HistoryManager::new_with_size(history_rx, size);
     let mut clipboard = ClipboardManager::new(clipboard_rx);
     let mut content = ContentManager::new(clipboard_tx.clone(), history_tx.clone());
 
