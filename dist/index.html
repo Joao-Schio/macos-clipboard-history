@@ -35,10 +35,32 @@
             background: #333;
             border-color: #bb86fc;
         }
+
+        .top-actions {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+        }
+
+        .clean-button {
+            background: #b00020;
+            color: white;
+            border: 1px solid #ff5b76;
+            border-radius: 4px;
+            padding: 6px 10px;
+            cursor: pointer;
+        }
+
+        .clean-button:hover {
+            background: #d4002b;
+        }
     </style>
 </head>
 
 <body>
+    <div class="top-actions">
+        <button id="clean-history-btn" class="clean-button">Clean</button>
+    </div>
     <h3>Clipboard History</h3>
     <div id="container"></div>
 
@@ -57,6 +79,11 @@
                 container.appendChild(div);
             });
         }
+
+        document.getElementById('clean-history-btn').onclick = async () => {
+            await invoke('clean_history');
+            await refresh();
+        };
 
         setInterval(refresh, 1000);
         refresh();
