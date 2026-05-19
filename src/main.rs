@@ -1,94 +1,42 @@
-#![allow(unexpected_cfgs)]
-use std::{
-    collections::VecDeque,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    },
-    time::Duration,
-};
+use tauri::{CustomMenuItem, SystemTray, SystemTrayMenu, SystemTrayEvent, Manager};
 
-#[cfg(target_os = "macos")]
-use std::process::{Command, Stdio};
 
+// Using the type aliases defined in your lib.rs[cite: 9]
 use clipboard_history::{
-    Writer,
     clipboard_manager::{ClipboardManager, ClipboardRequest},
-    content_manager::ContentManager,
     history::{HistoryManager, ManagerRequest},
-};
-use eframe::egui;
-use tokio::runtime::Runtime;
-use tray_icon::{
-    Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent,
-    menu::{Menu, MenuEvent, MenuId, MenuItem},
+    content_manager::ContentManager,
 };
 
-struct TrayState {
-    _tray: TrayIcon,
-    show_id: MenuId,
-    hide_id: MenuId,
-    quit_id: MenuId,
-    tray_id: tray_icon::TrayIconId,
+#[derive(Clone)]
+struct AppState {
+    history_tx: tokio::sync::mpsc::Sender<ManagerRequest>,
+    clipboard_tx: tokio::sync::mpsc::Sender<ClipboardRequest>,
 }
-
-fn make_icon() -> Icon {
-    let rgba = vec![
-        0, 0, 0, 255, 255, 255, 255, 255, 255, 255, 255, 255, 0, 0, 0, 255,
-    ];
-
-    Icon::from_rgba(rgba, 2, 2).expect("valid icon")
+#[tauri::command]
+async fn set_item(content: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
+    // Sends the request to the ClipboardManager actor
+    state.clipboard_tx.send(ClipboardRequest::Set { content })
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(())
 }
+#[tauri::command]
+async fn get_history(state: tauri::State<'_, AppState>) -> Result<Vec<String>, String> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    
+    // Request history from the HistoryManager actor[cite: 8, 10]
+    state.history_tx.send(ManagerRequest::Retrieve { response_channel: tx })
+        .await
+        .map_err(|e| e.to_string())?;
 
-fn create_tray() -> TrayState {
-    let menu = Menu::new();
-
-    let show = MenuItem::new("Show", true, None);
-    let hide = MenuItem::new("Hide", true, None);
-    let quit = MenuItem::new("Quit", true, None);
-
-    let show_id = show.id().clone();
-    let hide_id = hide.id().clone();
-    let quit_id = quit.id().clone();
-
-    menu.append(&show).unwrap();
-    menu.append(&hide).unwrap();
-    menu.append(&quit).unwrap();
-
-    let tray = TrayIconBuilder::new()
-        .with_menu(Box::new(menu))
-        .with_tooltip("Clipboard History")
-        .with_icon(make_icon())
-        .with_icon_as_template(true)
-        .with_menu_on_left_click(false)
-        .build()
-        .expect("tray icon creation failed");
-    let tray_id = tray.id().clone();
-
-    TrayState {
-        _tray: tray,
-        show_id,
-        hide_id,
-        quit_id,
-        tray_id,
-    }
+    let history = rx.await.map_err(|e| e.to_string())?;
+    Ok(history.into())
 }
-
-
-#[cfg(target_os = "macos")]
-fn hide_dock_icon() {
-    use objc::{msg_send, sel, sel_impl};
-    unsafe {
-        let cls = objc::runtime::Class::get("NSApplication").unwrap();
-        let app: *mut objc::runtime::Object = msg_send![cls, sharedApplication];
-        // Policy 1 = NSApplicationActivationPolicyAccessory (Tray only, no Dock)
-        // Policy 0 = NSApplicationActivationPolicyRegular (Normal app)
-        let _: () = msg_send![app, setActivationPolicy: 1];
-    }
-}
-
 #[cfg(target_os = "macos")]
 fn detach_from_terminal() {
+    use std::process::{Command, Stdio};
+
     if std::env::var_os("CLIPBOARD_HISTORY_DAEMONIZED").is_some() {
         return;
     }
@@ -114,266 +62,93 @@ fn detach_from_terminal() {
         std::process::exit(0);
     }
 }
-
-fn main() -> eframe::Result<()> {
+#[tokio::main]
+async fn main() {
     #[cfg(target_os = "macos")]
     detach_from_terminal();
-        
+    let (clip_tx, clip_rx) = tokio::sync::mpsc::channel(100);
+    let (hist_tx, hist_rx) = tokio::sync::mpsc::channel(100);
 
-    let rt = Arc::new(
-        tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .expect("failed to create tokio runtime"),
-    );
 
-    let (history_tx, clipboard_tx) = setup_backend(rt.clone());
+    let mut clipboard_mngr = ClipboardManager::new(clip_rx);
 
-    let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_title("Clipboard History")
-            .with_inner_size([500.0, 650.0])
-            .with_titlebar_buttons_shown(false)
-            .with_visible(false),
-        ..Default::default()
-    };
-
-    eframe::run_native(
-        "Clipboard History",
-        options,
-        Box::new(move |_cc| {
-            let tray = create_tray();
-
-            Ok(Box::new(App::new(
-                rt.clone(),
-                history_tx.clone(),
-                clipboard_tx.clone(),
-                tray,
-                _cc.egui_ctx.clone(),
-            )))
-        }),
-    )
-}
-
-fn setup_backend(rt: Arc<Runtime>) -> (Writer<ManagerRequest>, Writer<ClipboardRequest>) {
-    let (history_tx, history_rx) = tokio::sync::mpsc::channel(30);
-    let (clipboard_tx, clipboard_rx) = tokio::sync::mpsc::channel(30);
     let mut args = std::env::args().skip(1);
 
     let size = match args.next() {
         Some(val) => {
-            val
+            val.trim()
             .parse()
-            .expect("Failed to convert to usize")
-        },
+            .expect("Error when converting")
+        }
         None => {
             50usize
         }
     };
 
-    let mut history = HistoryManager::new_with_size(history_rx, size);
-    let mut clipboard = ClipboardManager::new(clipboard_rx);
-    let mut content = ContentManager::new(clipboard_tx.clone(), history_tx.clone());
+    let mut history_mngr = HistoryManager::new_with_size(hist_rx, size);
+    let mut content_mngr = ContentManager::new(clip_tx.clone(), hist_tx.clone());
 
-    rt.spawn(async move {
-        if let Err(err) = history.start().await {
-            eprintln!("history manager failed: {err}");
-        }
+
+    tokio::spawn(async move {
+        let _ = clipboard_mngr.start().await;
     });
 
-    rt.spawn(async move {
-        if let Err(err) = clipboard.start().await {
-            eprintln!("clipboard manager failed: {err}");
-        }
+    tokio::spawn(async move {
+        let _ = history_mngr.start().await;
     });
 
-    rt.spawn(async move {
-        if let Err(err) = content.start().await {
-            eprintln!("content manager failed: {err}");
-        }
+    tokio::spawn(async move {
+        let _ = content_mngr.start().await;
     });
 
-    (history_tx, clipboard_tx)
-}
 
-struct App {
-    rt: Arc<Runtime>,
-    history_tx: Writer<ManagerRequest>,
-    clipboard_tx: Writer<ClipboardRequest>,
-    _tray: TrayState,
-    items: Vec<String>,
-    status: String,
-    window_visible: Arc<AtomicBool>,
-    was_visible: bool,
-}
+    let quit = CustomMenuItem::new("quit".to_string(), "Quit");
+    let show = CustomMenuItem::new("show".to_string(), "Show History");
+    let tray_menu = SystemTrayMenu::new()
+        .add_item(show)
+        .add_native_item(tauri::SystemTrayMenuItem::Separator)
+        .add_item(quit);
 
-impl App {
-    fn new(
-        rt: Arc<Runtime>,
-        history_tx: Writer<ManagerRequest>,
-        clipboard_tx: Writer<ClipboardRequest>,
-        tray: TrayState,
-        ctx: egui::Context,
-    ) -> Self {
-        let window_visible = Arc::new(AtomicBool::new(false));
-        Self::start_tray_listener(ctx, &tray, window_visible.clone());
-        #[cfg(target_os = "macos")]
-        hide_dock_icon();
-        Self {
-            rt,
-            history_tx,
-            clipboard_tx,
-            _tray : tray,
-            items: Vec::new(),
-            status: "Watching clipboard…".to_string(),
-            window_visible,
-            was_visible: false,
-        }
-    }
+    let system_tray = SystemTray::new().with_menu(tray_menu);
 
-    fn start_tray_listener(ctx: egui::Context, tray: &TrayState, window_visible: Arc<AtomicBool>) {
-        let tray_id = tray.tray_id.clone();
-        let show_id = tray.show_id.clone();
-        let hide_id = tray.hide_id.clone();
-        let quit_id = tray.quit_id.clone();
 
-        std::thread::spawn(move || {
-            loop {
-                let mut handled_event = false;
-
-                while let Ok(event) = TrayIconEvent::receiver().try_recv() {
-                    if let TrayIconEvent::Click {
-                        id,
-                        button: MouseButton::Left,
-                        button_state: MouseButtonState::Up,
-                        ..
-                    } = event
-                    {
-                        if id == tray_id {
-                            let should_show = !window_visible.load(Ordering::Relaxed);
-                            window_visible.store(should_show, Ordering::Relaxed);
-
-                            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(should_show));
-                            if should_show {
-                                ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
-                                ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
-                            }
-                            ctx.request_repaint();
+    tauri::Builder::default()
+            .manage(AppState {
+                history_tx: hist_tx,
+                clipboard_tx: clip_tx,
+            })
+            .system_tray(system_tray)
+            .on_system_tray_event(|app, event| match event {
+                SystemTrayEvent::MenuItemClick { id, .. } => {
+                    match id.as_str() {
+                        "quit" => std::process::exit(0),
+                        "show" => {
+                            let window = app.get_window("main").unwrap();
+                            window.show().unwrap();
+                            window.set_focus().unwrap();
+                        }
+                        _ => {}
+                    }
+                }
+                _ => {}
+            })
+            .on_window_event(|event| {
+                match event.event() {
+                    tauri::WindowEvent::Focused(focused) => {
+                        // If the window is no longer focused, hide it
+                        if !focused {
+                            event.window().hide().unwrap();
                         }
                     }
-                    handled_event = true;
+                    _ => {}
                 }
-
-                while let Ok(event) = MenuEvent::receiver().try_recv() {
-                    if event.id == show_id {
-                        window_visible.store(true, Ordering::Relaxed);
-                        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
-                        ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
-                        ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
-                        ctx.request_repaint();
-                    } else if event.id == hide_id {
-                        window_visible.store(false, Ordering::Relaxed);
-                        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
-                    } else if event.id == quit_id {
-                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                        return;
-                    }
-                    handled_event = true;
-                }
-
-                if !handled_event {
-                    std::thread::sleep(Duration::from_millis(50));
-                }
-            }
-        });
-    }
-
-    fn refresh_history(&mut self) {
-        let (tx, rx) = tokio::sync::oneshot::channel::<VecDeque<String>>();
-        let history_tx = self.history_tx.clone();
-
-        self.rt.spawn(async move {
-            let _ = history_tx
-                .send(ManagerRequest::Retrieve {
-                    response_channel: tx,
-                })
-                .await;
-        });
-
-        match self.rt.block_on(rx) {
-            Ok(snapshot) => {
-                self.items = snapshot.into_iter().collect();
-                self.status = "Watching clipboard…".to_string();
-            }
-            Err(_) => {
-                self.status = "Could not refresh history".to_string();
-            }
-        }
-    }
-
-    fn restore_item(&mut self, content: String) {
-        let clipboard_tx = self.clipboard_tx.clone();
-
-        self.rt.spawn(async move {
-            let _ = clipboard_tx.send(ClipboardRequest::Set { content }).await;
-        });
-    }
-}
-
-impl eframe::App for App {
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        // 1. Get the current focus and minimized state from the viewport
-        let info = ui.ctx().input(|i| i.viewport().clone());
-        let focused = info.focused.unwrap_or(true);
-        let minimized = info.minimized.unwrap_or(false);
-
-        // 2. Hide if minimized or if it loses focus while being visible
-        if minimized || (self.was_visible && !focused) {
-            self.window_visible.store(false, Ordering::Relaxed);
-            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Visible(false));
-            
-            // Reset minimized state so it can be reopened normally
-            if minimized {
-                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Minimized(false));
-            }
-        }
-
-        if !self.window_visible.load(Ordering::Relaxed) {
-            self.was_visible = false;
-            return;
-        }
-
-        if !self.was_visible {
-            self.refresh_history();
-            self.was_visible = true;
-        }
-        egui::CentralPanel::default().show_inside(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.heading("Clipboard History");
-
-                if ui.button("Hide").clicked() {
-                    self.window_visible.store(false, Ordering::Relaxed);
-                    ui.ctx()
-                        .send_viewport_cmd(egui::ViewportCommand::Visible(false));
-                }
-            });
-
-            ui.label(&self.status);
-            ui.separator();
-
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                for item in self.items.clone() {
-                    let preview = if item.len() > 80 {
-                        format!("{}...", &item[..80])
-                    } else {
-                        item.clone()
-                    };
-
-                    if ui.button(preview).clicked() {
-                        self.restore_item(item);
-                    }
-                }
-            });
-        });
-    }
+            })
+            .setup(|app| {
+                #[cfg(target_os = "macos")]
+                app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+                Ok(())
+            })
+            .invoke_handler(tauri::generate_handler![get_history, set_item])
+            .run(tauri::generate_context!())
+            .expect("error while running tauri application");
 }

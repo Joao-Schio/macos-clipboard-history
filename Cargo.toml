@@ -1,19 +1,16 @@
 [package]
 name = "clipboard_history"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
+# Explicitly point to the build script
+build = "build.rs"
 
 [dependencies]
-arboard = "3.6.1"
-eframe = "0.34.1"
-egui = "0.34.1"
-objc = "0.2"
+# Your existing dependencies
+tauri = { version = "1", features = ["api-all", "system-tray"] }
 tokio = { version = "1.50.0", features = ["full"] }
-tray-icon = "0.21.3"
-[package.metadata.bundle]
-name = "Clipboard History"
-identifier = "dev.joao.clipboard-history"
-icon = []
-plist = "Info.plist"
-[lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(cargo_clippy)'] }
+arboard = "3.6.1"
+
+[build-dependencies]
+# Required for the build.rs logic[cite: 12]
+tauri-build = "1"

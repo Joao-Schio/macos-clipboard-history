@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <style>
+        html,
+        body {
+            background-color: #121212;
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            width: 100%;
+        }
+
+        body {
+            color: white;
+            font-family: sans-serif;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+
+        .entry {
+            background: #222;
+            padding: 10px;
+            margin-bottom: 5px;
+            border-radius: 4px;
+            cursor: pointer;
+            border: 1px solid #444;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .entry:hover {
+            background: #333;
+            border-color: #bb86fc;
+        }
+    </style>
+</head>
+
+<body>
+    <h3>Clipboard History</h3>
+    <div id="container"></div>
+
+    <script>
+        const { invoke } = window.__TAURI__.tauri;
+
+        async function refresh() {
+            const entries = await invoke('get_history');
+            const container = document.getElementById('container');
+            container.innerHTML = '';
+            entries.forEach(text => {
+                const div = document.createElement('div');
+                div.className = 'entry';
+                div.textContent = text;
+                div.onclick = () => invoke('set_item', { content: text });
+                container.appendChild(div);
+            });
+        }
+
+        setInterval(refresh, 1000);
+        refresh();
+    </script>
+</body>
+
+</html>

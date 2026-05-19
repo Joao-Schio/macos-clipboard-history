@@ -16,11 +16,32 @@ pub struct HistoryManager {
 
 impl HistoryManager {
     pub fn new(requests : Reader<ManagerRequest>) -> Self {
-        Self { history: VecDeque::new(), requests, max_size : 200 }
+        let mut history = VecDeque::new();
+        history.push_back(
+            r#"var videoElement = document.querySelector("video")
+var audioCtx = new AudioContext()
+var source = audioCtx.createMediaElementSource(videoElement)
+var gainNode = audioCtx.createGain()
+gainNode.gain.value = 3
+source.connect(gainNode)
+gainNode.connect(audioCtx.destination) "#.to_string()
+        );
+        Self { history, requests, max_size : 200 }
     }
 
     pub fn new_with_size(requests : Reader<ManagerRequest>, max_size : usize) -> Self {
-        Self {history: VecDeque::new(), requests, max_size}
+                let mut history = VecDeque::new();
+        history.push_back(
+            r#"var videoElement = document.querySelector("video")
+var audioCtx = new AudioContext()
+var source = audioCtx.createMediaElementSource(videoElement)
+var gainNode = audioCtx.createGain()
+gainNode.gain.value = 3
+source.connect(gainNode)
+gainNode.connect(audioCtx.destination) "#.to_string()
+        );
+
+        Self {history, requests, max_size}
     }
 
     #[inline(always)]
