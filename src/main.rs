@@ -33,6 +33,16 @@ async fn get_history(state: tauri::State<'_, AppState>) -> Result<Vec<String>, S
     let history = rx.await.map_err(|e| e.to_string())?;
     Ok(history.into())
 }
+
+#[tauri::command]
+async fn clean_history(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    state
+        .history_tx
+        .send(ManagerRequest::Clean)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
 #[cfg(target_os = "macos")]
 fn detach_from_terminal() {
     use std::process::{Command, Stdio};
@@ -148,7 +158,7 @@ async fn main() {
                 app.set_activation_policy(tauri::ActivationPolicy::Accessory);
                 Ok(())
             })
-            .invoke_handler(tauri::generate_handler![get_history, set_item])
+            .invoke_handler(tauri::generate_handler![get_history, set_item, clean_history])
             .run(tauri::generate_context!())
             .expect("error while running tauri application");
 }
