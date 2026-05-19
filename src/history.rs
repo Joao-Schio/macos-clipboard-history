@@ -5,6 +5,7 @@ use crate::Reader;
 pub enum ManagerRequest {
     Add{content : String},
     Retrieve {response_channel : oneshot::Sender<VecDeque<String>>},
+    Clean
 }
 
 pub struct HistoryManager {
@@ -42,6 +43,9 @@ impl HistoryManager {
                 },
                 ManagerRequest::Retrieve { response_channel } => {
                     let _ = response_channel.send(self.history.clone());
+                },
+                ManagerRequest::Clean => {
+                    self.history.clear();
                 }
             }
         }
